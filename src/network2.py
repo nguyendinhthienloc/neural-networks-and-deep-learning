@@ -67,7 +67,7 @@ class CrossEntropyCost(object):
 #### Main Network class
 class Network(object):
 
-    def __init__(self, sizes, cost=CrossEntropyCost):
+    def __init__(self, sizes, cost=CrossEntropyCost, pipeline_logging=False):
         """The list ``sizes`` contains the number of neurons in the respective
         layers of the network.  For example, if the list was [2, 3, 1]
         then it would be a three-layer network, with the first layer
@@ -80,8 +80,22 @@ class Network(object):
         """
         self.num_layers = len(sizes)
         self.sizes = sizes
+        self.pipeline_logging = pipeline_logging
+        self._pipeline_logged = set()
+        self._pipeline_epoch = None
+        self._pipeline_mini_batch = None
+        self._pipeline_mini_batch_count = None
         self.default_weight_initializer()
         self.cost=cost
+
+    def log_pipeline(self, message):
+        if self.pipeline_logging:
+            print("[network2] {}".format(message))
+
+    def log_pipeline_once(self, key, message):
+        if key not in self._pipeline_logged:
+            self.log_pipeline(message)
+            self._pipeline_logged.add(key)
 
     def default_weight_initializer(self):
         """Initialize each weight using a Gaussian distribution with mean 0
@@ -96,6 +110,7 @@ class Network(object):
         layers.
 
         """
+        self.log_pipeline("initialize weights and biases")
         self.biases = [np.random.randn(y, 1) for y in self.sizes[1:]]
         self.weights = [np.random.randn(y, x)/np.sqrt(x)
                         for x, y in zip(self.sizes[:-1], self.sizes[1:])]
@@ -116,12 +131,16 @@ class Network(object):
         instead.
 
         """
+        self.log_pipeline("initialize large random weights and biases")
         self.biases = [np.random.randn(y, 1) for y in self.sizes[1:]]
         self.weights = [np.random.randn(y, x)
                         for x, y in zip(self.sizes[:-1], self.sizes[1:])]
 
     def feedforward(self, a):
         """Return the output of the network if ``a`` is input."""
+        self.log_pipeline_once(
+            "feedforward",
+            "feedforward: input -> weighted sums -> sigmoid activations")
         for b, w in zip(self.biases, self.weights):
             a = sigmoid(np.dot(w, a)+b)
         return a
@@ -154,36 +173,51 @@ class Network(object):
         """
         if evaluation_data: n_data = len(evaluation_data)
         n = len(training_data)
+        self.log_pipeline(
+            "SGD start: {} examples, {} epochs, mini_batch_size={}, eta={}, "
+            "lambda={}".format(n, epochs, mini_batch_size, eta, lmbda))
         evaluation_cost, evaluation_accuracy = [], []
         training_cost, training_accuracy = [], []
-        for j in xrange(epochs):
+        for j in range(epochs):
+            self._pipeline_epoch = j
+            self.log_pipeline("epoch {}: shuffle training data".format(j))
             random.shuffle(training_data)
             mini_batches = [
                 training_data[k:k+mini_batch_size]
-                for k in xrange(0, n, mini_batch_size)]
-            for mini_batch in mini_batches:
+                for k in range(0, n, mini_batch_size)]
+            self._pipeline_mini_batch_count = len(mini_batches)
+            self.log_pipeline(
+                "epoch {}: split into {} mini-batches".format(
+                    j, len(mini_batches)))
+            for batch_index, mini_batch in enumerate(mini_batches):
+                self._pipeline_mini_batch = batch_index
                 self.update_mini_batch(
                     mini_batch, eta, lmbda, len(training_data))
-            print "Epoch %s training complete" % j
+            print("Epoch %s training complete" % j)
             if monitor_training_cost:
+                self.log_pipeline("epoch {}: compute training cost".format(j))
                 cost = self.total_cost(training_data, lmbda)
                 training_cost.append(cost)
-                print "Cost on training data: {}".format(cost)
+                print("Cost on training data: {}".format(cost))
             if monitor_training_accuracy:
+                self.log_pipeline("epoch {}: compute training accuracy".format(j))
                 accuracy = self.accuracy(training_data, convert=True)
                 training_accuracy.append(accuracy)
-                print "Accuracy on training data: {} / {}".format(
-                    accuracy, n)
+                print("Accuracy on training data: {} / {}".format(
+                    accuracy, n))
             if monitor_evaluation_cost:
+                self.log_pipeline("epoch {}: compute evaluation cost".format(j))
                 cost = self.total_cost(evaluation_data, lmbda, convert=True)
                 evaluation_cost.append(cost)
-                print "Cost on evaluation data: {}".format(cost)
+                print("Cost on evaluation data: {}".format(cost))
             if monitor_evaluation_accuracy:
+                self.log_pipeline(
+                    "epoch {}: compute evaluation accuracy".format(j))
                 accuracy = self.accuracy(evaluation_data)
                 evaluation_accuracy.append(accuracy)
-                print "Accuracy on evaluation data: {} / {}".format(
-                    self.accuracy(evaluation_data), n_data)
-            print
+                print("Accuracy on evaluation data: {} / {}".format(
+                    self.accuracy(evaluation_data), n_data))
+            print()
         return evaluation_cost, evaluation_accuracy, \
             training_cost, training_accuracy
 
@@ -195,6 +229,17 @@ class Network(object):
         ``n`` is the total size of the training data set.
 
         """
+        if (self._pipeline_mini_batch_count is None or
+                self._pipeline_mini_batch in (0, self._pipeline_mini_batch_count-1)
+                or self._pipeline_mini_batch_count <= 3):
+            self.log_pipeline(
+                "epoch {} mini-batch {}/{}: update weights with backprop "
+                "gradients".format(
+                    self._pipeline_epoch,
+                    self._pipeline_mini_batch + 1
+                    if self._pipeline_mini_batch is not None else 1,
+                    self._pipeline_mini_batch_count
+                    if self._pipeline_mini_batch_count is not None else 1))
         nabla_b = [np.zeros(b.shape) for b in self.biases]
         nabla_w = [np.zeros(w.shape) for w in self.weights]
         for x, y in mini_batch:
@@ -211,6 +256,10 @@ class Network(object):
         gradient for the cost function C_x.  ``nabla_b`` and
         ``nabla_w`` are layer-by-layer lists of numpy arrays, similar
         to ``self.biases`` and ``self.weights``."""
+        self.log_pipeline_once(
+            "backprop",
+            "backprop: feedforward sample, compute output error, then move "
+            "backward through layers")
         nabla_b = [np.zeros(b.shape) for b in self.biases]
         nabla_w = [np.zeros(w.shape) for w in self.weights]
         # feedforward
@@ -232,7 +281,7 @@ class Network(object):
         # second-last layer, and so on.  It's a renumbering of the
         # scheme in the book, used here to take advantage of the fact
         # that Python can use negative indices in lists.
-        for l in xrange(2, self.num_layers):
+        for l in range(2, self.num_layers):
             z = zs[-l]
             sp = sigmoid_prime(z)
             delta = np.dot(self.weights[-l+1].transpose(), delta) * sp
@@ -263,6 +312,7 @@ class Network(object):
         mnist_loader.load_data_wrapper.
 
         """
+        self.log_pipeline("accuracy: run feedforward and count matches")
         if convert:
             results = [(np.argmax(self.feedforward(x)), np.argmax(y))
                        for (x, y) in data]
@@ -278,6 +328,7 @@ class Network(object):
         the validation or test data.  See comments on the similar (but
         reversed) convention for the ``accuracy`` method, above.
         """
+        self.log_pipeline("total_cost: run feedforward and average cost")
         cost = 0.0
         for x, y in data:
             a = self.feedforward(x)

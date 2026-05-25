@@ -11,14 +11,12 @@ systems.
 
 """
 
-from __future__ import print_function
-
 #### Libraries
 
 # Standard library
-import cPickle
 import gzip
 import os.path
+import pickle
 import random
 
 # Third-party libraries
@@ -29,9 +27,9 @@ print("Expanding the MNIST training set")
 if os.path.exists("../data/mnist_expanded.pkl.gz"):
     print("The expanded training set already exists.  Exiting.")
 else:
-    f = gzip.open("../data/mnist.pkl.gz", 'rb')
-    training_data, validation_data, test_data = cPickle.load(f)
-    f.close()
+    with gzip.open("../data/mnist.pkl.gz", 'rb') as f:
+        training_data, validation_data, test_data = pickle.load(
+            f, encoding="latin1")
     expanded_training_pairs = []
     j = 0 # counter
     for x, y in zip(training_data[0], training_data[1]):
@@ -55,6 +53,8 @@ else:
     random.shuffle(expanded_training_pairs)
     expanded_training_data = [list(d) for d in zip(*expanded_training_pairs)]
     print("Saving expanded data. This may take a few minutes.")
-    f = gzip.open("../data/mnist_expanded.pkl.gz", "w")
-    cPickle.dump((expanded_training_data, validation_data, test_data), f)
-    f.close()
+    with gzip.open("../data/mnist_expanded.pkl.gz", "wb") as f:
+        pickle.dump(
+            (expanded_training_data, validation_data, test_data),
+            f,
+            protocol=pickle.HIGHEST_PROTOCOL)

@@ -3,6 +3,8 @@
 *.pem
 *.pkl
 *.pyc
+__pycache__/
 .DS_Store
 loc.py
 src/ec2
+.venv/
